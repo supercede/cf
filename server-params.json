@@ -1,0 +1,18 @@
+[
+  {
+    "ParameterKey": "EnvironmentName",
+    "ParameterValue": "UdacityProject"
+  },
+  {
+    "ParameterKey": "ImageId",
+    "ParameterValue": "ami-00ddb0e5626798373"
+  },
+  {
+    "ParameterKey": "ServerKeyName",
+    "ParameterValue": "cfn-key"
+  },
+  {
+    "ParameterKey": "JumpServerKeyName",
+    "ParameterValue": "jmpbx"
+  }
+]

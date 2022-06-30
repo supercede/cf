@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: A cloudformation template to create AWS EC2 web app resources
+
+Parameters:
+  EnvironmentName:
+    Description: Our current working environment name
+    Type: String
+
+  ImageId:
+    Description: The AMI ID to use for the EC2 instance
+    Type: String
+
+  ServerKeyName:
+    Description: The name of the SSH key pair to use for the EC2 instance
+    Type: String
+
+  JumpServerKeyName:
+    Description: The name of the SSH key pair to use for the jump server
+    Type: String
+
+Resources:
+  EC2ReadOnlyS3Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - EC2ReadOnlyS3Access
+
+  WebServerLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !Ref ImageId
+      IamInstanceProfile: !Ref EC2ReadOnlyS3Profile
+      InstanceType: t3.small
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo apt-get update -y
+          sudo apt-get install apache2 -y
+          sudo systemctl start apache2.service
+          sudo apt-get install awscli -y
+          cd /var/www/html
+          sudo aws s3 cp s3://ud-project-bucket . --recursive
+      #      echo "Udacity Demo Web Server Up and Running!" > index.html
+      SecurityGroups:
+        - Fn::ImportValue: !Sub "${EnvironmentName}-WSSG"
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: 10
+
+  WebServerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      Port: 80
+      Protocol: HTTP
+      VpcId:
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+
+  WebServerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub "${EnvironmentName}-PRIV-NETS"
+      LaunchConfigurationName: !Ref WebServerLaunchConfig
+      MinSize: "2"
+      MaxSize: "3"
+      TargetGroupARNs:
+        - !Ref WebServerTargetGroup
+
+  WebAppLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+        - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
+        - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
+      SecurityGroups:
+        - Fn::ImportValue: !Sub "${EnvironmentName}-LBSG"
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref WebAppLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebServerTargetGroup
+
+  LoadBalancerListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref WebServerTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values: [/]
+      ListenerArn: !Ref LoadBalancerListener
+      Priority: 1
+
+  JumpServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      KeyName: !Ref JumpServerKeyName
+      InstanceType: t2.micro
+      SubnetId:
+        Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub "${EnvironmentName}-JSSG"
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: 6
+
+Outputs:
+  WebAppURL:
+    Description: The URL of the web app
+    Value: !Sub http://${WebAppLoadBalancer.DNSName}/
