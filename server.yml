@@ -31,6 +31,7 @@ Resources:
       ImageId: !Ref ImageId
       IamInstanceProfile: !Ref EC2ReadOnlyS3Profile
       InstanceType: t3.small
+      # KeyName: !Ref ServerKeyName
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
